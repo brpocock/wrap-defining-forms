@@ -1,12 +1,11 @@
 ;;;; Wrap--Defining-Forms
 ;;; -*- Lisp -*-
 
-
 (defpackage wrap-defining-forms
   (:use :common-lisp)
   (:documentation "Wrap  defining forms so  that they (try to)  save the
   source code of the definition being passed.")
-  (:export #:wrap-definition #:dump-definitions
+  (:export #:wrap-defining-form #:dump-definitions
            
            #:defclass$
            #:defconstant$
@@ -27,7 +26,7 @@
            #:defun$
            #:defvar$))
 
-(defpackage :wrap-defining-forms.shadowing
+(defpackage wrap-defining-forms.shadowing
   (:documentation "Wrapped forms like DEFUN$  are exported here with the
   names   of   the    forms   that   they   wrap,    like   DEFUN,   for
   shadowing imports.")
@@ -48,7 +47,13 @@
            #:defstruct
            #:deftype
            #:defun
-           #:defvar))
+           #:defvar)
+  (:use))
+
+;; Clozure appears  to be  “smart” and adds  Common-Lisp even  though we
+;; didn't ask for it (and explicily don't want it)
+#+ccl (unuse-package '(:ccl :common-lisp)
+                     :wrap-defining-forms.shadowing)
 
 (defpackage :common-lisp-user/save-defs
   (:nicknames :cl-user$)
@@ -86,6 +91,26 @@
 (defvar *definitions* (make-hash-table)
   "Copies   of    forms   defined    by   the   wrappers    created   by
   `WRAP-DEFINING-FORM' which can be stashed with `DUMP-DEFINITIONS'")
+
+#+ccl
+(defun ccl-mock-lambda-list (function)
+  (if (macro-function function)
+      (list '&rest 'macro-lambda-list)
+      (multiple-value-bind (required optional restp
+                            keywords) 
+          (ccl:function-args (fdefinition function))
+        (concatenate ' list
+                       (loop repeat required 
+                             collect (gensym "ARG-"))
+                       (when (and optional (plusp optional))
+                         (cons '&optional
+                               (loop repeat optional
+                                     collect (gensym "OPT-"))))
+                       (when restp
+                         (list '&rest 'rest))
+                       (when (and keywords (plusp keywords))
+                         (list '&key '&allow-other-keys))))))
+
 (defun find-function-lambda-list ()
   "Find the implementation's version  of `FUNCTION-LAMBDA-LIST' if there
 is  one.  That  way,  Slime  and  friends  can  still  give  the  proper
@@ -93,11 +118,12 @@ lambda-list  for the  wrapped form.  If it  can't be  found, this  will
 return a stub with just a &rest-var."
   (or
    #+sbcl #'sb-introspect:function-lambda-list
-   #-sbcl (mapcar (lambda (package)
-                    (let ((sym (find-symbol "FUNCTION-LAMBDA-LIST" package)))
-                      (when (fboundp sym)
-                        (return-from find-function-lambda-list sym))))
-                  (list-all-packages)) 
+   #+ccl #'ccl-mock-lambda-list
+   #-(or ccl sbcl)
+   (dolist (package (list-all-packages))
+     (let ((sym (find-symbol "FUNCTION-LAMBDA-LIST" package)))
+       (when (fboundp sym)
+         (return-from find-function-lambda-list sym)))) 
    (lambda (function)
      (declare (ignore function))
      (list '&rest 'unknown-lambda-list))))
