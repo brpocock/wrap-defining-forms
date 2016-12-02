@@ -7,6 +7,18 @@ Inspired by this Stack Overflow question (and composed as an answer):
 
 https://stackoverflow.com/questions/40902449/view-or-extract-the-text-definitions-entered-into-the-top-level-repl-ideally-fo
 
+# Implementations
+
+This works fairly well in SBCL, and was gently tested in Clozure. I made
+a little effort to try in out in Allegro, CLisp, and saw some- Google-Fu
+that suggested how it might work in LispWorks.
+
+I ran into  problems getting GCL and  ECL to accept it,  which might not
+be solved.
+
+Feel free  to port/fix/improve and send  a Pull Request. I  may actually
+use some of this in another project.
+
 # Question
 
 
