@@ -80,9 +80,10 @@
                           #:defvar))
 ;; Clone any other functions you may have packed into CL-User.
 (with-package-iterator (next-symbol :common-lisp-user :internal)
-  (loop for symbol = (next-symbol) 
+  (loop for symbol = (next-symbol)
+        for sibling = (when symbol
+                        (intern (symbol-name symbol) (find-package :cl-user$)))
         while symbol
-        for sibling = (intern (symbol-name symbol) (find-package :cl-user$))
         when (and (fboundp symbol)
                   (not (fboundp sibling)))
           do (setf (fdefinition sibling) (fdefinition symbol))))
@@ -92,24 +93,42 @@
   "Copies   of    forms   defined    by   the   wrappers    created   by
   `WRAP-DEFINING-FORM' which can be stashed with `DUMP-DEFINITIONS'")
 
+(defun mock-lambda-list (required optional restp keywords)
+  (concatenate ' list
+                 (loop repeat required 
+                       collect (gensym "ARG-"))
+                 (when (and optional (plusp optional))
+                   (cons '&optional
+                         (loop repeat optional
+                               collect (gensym "OPT-"))))
+                 (when restp
+                   (list '&rest 'rest))
+                 (when (and keywords (plusp keywords))
+                   (list '&key '&allow-other-keys))))
+
+#+clisp
+(defun clisp-mock-lambda-list (function)
+  (if (macro-function function)
+      (make-unknown-lambda-list function)
+      (apply #'mock-lambda-list
+             ;; Luckily, the first four members of this vector line up.
+             (coerce (subseq
+                      (system::get-signature function)
+                      0 4)
+                     'list))))
+
 #+ccl
 (defun ccl-mock-lambda-list (function)
   (if (macro-function function)
-      (list '&rest 'macro-lambda-list)
+      (make-unknown-lambda-list function)
       (multiple-value-bind (required optional restp
                             keywords) 
           (ccl:function-args (fdefinition function))
-        (concatenate ' list
-                       (loop repeat required 
-                             collect (gensym "ARG-"))
-                       (when (and optional (plusp optional))
-                         (cons '&optional
-                               (loop repeat optional
-                                     collect (gensym "OPT-"))))
-                       (when restp
-                         (list '&rest 'rest))
-                       (when (and keywords (plusp keywords))
-                         (list '&key '&allow-other-keys))))))
+        (mock-lambda-list required optional restp keywords))))
+
+(defun make-unknown-lambda-list (function)
+  (declare (ignore function))
+  (list '&rest 'unknown-lambda-list))
 
 (defun find-function-lambda-list ()
   "Find the implementation's version  of `FUNCTION-LAMBDA-LIST' if there
@@ -119,14 +138,13 @@ return a stub with just a &rest-var."
   (or
    #+sbcl #'sb-introspect:function-lambda-list
    #+ccl #'ccl-mock-lambda-list
-   #-(or ccl sbcl)
+   #+clisp #'clisp-mock-lambda-list
+   #-(or ccl sbcl clisp)
    (dolist (package (list-all-packages))
      (let ((sym (find-symbol "FUNCTION-LAMBDA-LIST" package)))
        (when (fboundp sym)
          (return-from find-function-lambda-list sym)))) 
-   (lambda (function)
-     (declare (ignore function))
-     (list '&rest 'unknown-lambda-list))))
+   #'make-unknown-lambda-list))
 
 (defmacro wrap-defining-form (cl-form) 
   "Assuming  that CL-FORM  is a  symbol for  a macro  or function  which
