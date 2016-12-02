@@ -119,27 +119,28 @@
   (declare (ignore function))
   (list '&rest 'unknown-lambda-list))
 
-(defun find-function-lambda-list ()
-  "Find the implementation's version  of `FUNCTION-LAMBDA-LIST' if there
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun find-function-lambda-list ()
+    "Find the implementation's version  of `FUNCTION-LAMBDA-LIST' if there
 is  one.  That  way,  Slime  and  friends  can  still  give  the  proper
 lambda-list  for the  wrapped form.  If it  can't be  found, this  will
 return a stub with just a &rest-var."
-  (or
-   #+sbcl #'sb-introspect:function-lambda-list
-   #+ccl #'ccl-mock-lambda-list
-   #+clisp #'system::arglist
-   #+allegro #'excl::arglist
-   #+lispworks #'lw:function-lambda-list ; I have not tested this
-   #+ecl #'ext:function-lambda-list
-   #-(or ccl sbcl clisp allegro lispworks)
-   (dolist (package (list-all-packages))
-     (let ((sym (or (find-symbol "FUNCTION-LAMBDA-LIST" package)
-                    (find-symbol "ARGLIST" package))))
-       (when (fboundp sym)
-         (warn "Guessing that ~a function ~s is like FUNCTION-LAMBDA-LIST from SBCL"
-               (lisp-implementation-type) sym)
-         (return-from find-function-lambda-list sym)))) 
-   #'make-unknown-lambda-list))
+    (or
+     #+sbcl #'sb-introspect:function-lambda-list
+     #+ccl #'ccl-mock-lambda-list
+     #+clisp #'system::arglist
+     #+allegro #'excl::arglist
+     #+lispworks #'lw:function-lambda-list ; I have not tested this
+     #+ecl #'ext:function-lambda-list
+     #-(or ccl sbcl clisp allegro lispworks)
+     (dolist (package (list-all-packages))
+       (let ((sym (or (find-symbol "FUNCTION-LAMBDA-LIST" package)
+                      (find-symbol "ARGLIST" package))))
+         (when (fboundp sym)
+           (warn "Guessing that ~a function ~s is like FUNCTION-LAMBDA-LIST from SBCL"
+                 (lisp-implementation-type) sym)
+           (return-from find-function-lambda-list sym)))) 
+     #'make-unknown-lambda-list)))
 
 (defmacro wrap-defining-form (cl-form) 
   "Assuming  that CL-FORM  is a  symbol for  a macro  or function  which
@@ -199,6 +200,34 @@ poorly with DEFMETHOD."
 (wrap-defining-form deftype)
 (wrap-defining-form defun)
 (wrap-defining-form defvar)
+
+(defun collect-functions-of-unknown-provenance (output)
+  (let ((list nil)
+        (package (find-package *package*))) 
+    (do-all-symbols (s list)
+      (cond
+        ((and package (not (eql (symbol-package s) package))) nil)
+        ((and (boundp s) 
+              (null (gethash s (gethash 'defvar *definitions*)))
+              (null (gethash s (gethash 'defparameter *definitions*))))
+         (format output
+                 "~2&;;; Unknown origin:~%~:<~W~^ ~@_~:I~W~^ ~:_~W~^~1I ~_~W~:>"
+                 (list 'defparameter s (symbol-value s)) list))
+        ((and (fboundp s) 
+              (not (macro-function s))
+              (null (gethash s (gethash 'defun *definitions*)))) 
+         (let ((def (function-lambda-expression (coerce s 'function))))
+           (when def (format output
+                             "~2&;;; Unknown origin:~%~:<~W~^ ~@_~:I~W~^ ~:_~W~^~1I ~_~W~:>"
+                             (list* 'defun s (cddr def)) list))))))))
+
+(defun collect-all-definitions ()
+  (remove-if #'null
+             (loop for form being the hash-keys of *definitions*
+                   for defs = (gethash form *definitions*)
+                   collect (loop for definition being the hash-values of defs
+                                 collect definition))))
+
 (defun dump-definitions (&optional pathname)
   "Write  out   the  definitions  saved   by  `WRAP-DEFINING-FORM'-built
 wrappers to PATHNAME (or *STANDARD-OUTPUT*)."
@@ -218,13 +247,11 @@ wrappers to PATHNAME (or *STANDARD-OUTPUT*)."
                   (format output
                           "~&~|~%;;; definitions as of ~d-~d-~d @ ~d:~2,'0d:
 \(In-Package #:~a)
-~{~{~2%~:<~W ~@_~:I~W ~:_~W~1I ~_~W~:>~}~^~|~}~%~|~%" ; from CLHS 22.2.2 SIMPLE-PPRINT-DEFUN
+~{~{~2%~:<~W~^ ~@_~:I~W~^ ~:_~W~^~1I ~_~W~:>~}~^~|~}~%~|~%" ; from CLHS 22.2.2 SIMPLE-PPRINT-DEFUN
                           y m d hr min
                           (package-name *package*)
-                          (remove-if #'null
-                                     (loop for form being the hash-keys of *definitions*
-                                           for defs = (gethash form *definitions*)
-                                           collect (loop for definition being the hash-values of defs
-                                                         collect definition))))))
-      (when output (ignore-errors (close output))))))
+                          (collect-all-definitions))
+                  (collect-functions-of-unknown-provenance output)
+                  (format output "~&~|~%;;; (end)~%")))
+      (when output (ignore-errors (if pathname (close output)))))))
 
