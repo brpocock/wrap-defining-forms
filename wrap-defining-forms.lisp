@@ -128,10 +128,14 @@ return a stub with just a &rest-var."
    #+sbcl #'sb-introspect:function-lambda-list
    #+ccl #'ccl-mock-lambda-list
    #+clisp #'system::arglist
-   #-(or ccl sbcl clisp)
+   #+allegro #'excl::arglist
+   #-(or ccl sbcl clisp allegro)
    (dolist (package (list-all-packages))
-     (let ((sym (find-symbol "FUNCTION-LAMBDA-LIST" package)))
+     (let ((sym (or (find-symbol "FUNCTION-LAMBDA-LIST" package)
+                    (find-symbol "ARGLIST" package))))
        (when (fboundp sym)
+         (warn "Guessing that ~a function ~s is like FUNCTION-LAMBDA-LIST from SBCL"
+               (lisp-implementation-type) sym)
          (return-from find-function-lambda-list sym)))) 
    #'make-unknown-lambda-list))
 
