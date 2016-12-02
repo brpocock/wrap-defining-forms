@@ -129,7 +129,8 @@ return a stub with just a &rest-var."
    #+ccl #'ccl-mock-lambda-list
    #+clisp #'system::arglist
    #+allegro #'excl::arglist
-   #-(or ccl sbcl clisp allegro)
+   #+lispworks #'lw:function-lambda-list
+   #-(or ccl sbcl clisp allegro lispworks)
    (dolist (package (list-all-packages))
      (let ((sym (or (find-symbol "FUNCTION-LAMBDA-LIST" package)
                     (find-symbol "ARGLIST" package))))
