@@ -106,17 +106,6 @@
                  (when (and keywords (plusp keywords))
                    (list '&key '&allow-other-keys))))
 
-#+clisp
-(defun clisp-mock-lambda-list (function)
-  (if (macro-function function)
-      (make-unknown-lambda-list function)
-      (apply #'mock-lambda-list
-             ;; Luckily, the first four members of this vector line up.
-             (coerce (subseq
-                      (system::get-signature function)
-                      0 4)
-                     'list))))
-
 #+ccl
 (defun ccl-mock-lambda-list (function)
   (if (macro-function function)
@@ -138,7 +127,7 @@ return a stub with just a &rest-var."
   (or
    #+sbcl #'sb-introspect:function-lambda-list
    #+ccl #'ccl-mock-lambda-list
-   #+clisp #'clisp-mock-lambda-list
+   #+clisp #'system::arglist
    #-(or ccl sbcl clisp)
    (dolist (package (list-all-packages))
      (let ((sym (find-symbol "FUNCTION-LAMBDA-LIST" package)))
